@@ -47,6 +47,7 @@
 		[m.userinfo_url()]: `https://${page.url.host}/api/oidc/userinfo`,
 		[m.logout_url()]: `https://${page.url.host}/api/oidc/end-session`,
 		[m.certificate_url()]: `https://${page.url.host}/.well-known/jwks.json`,
+		[m.webfinger_url()]: `https://${page.url.host}/.well-known/webfinger`,
 		[m.pkce()]: client.pkceEnabled ? m.enabled() : m.disabled(),
 		[m.requires_reauthentication()]: client.requiresReauthentication ? m.enabled() : m.disabled(),
 		[m.requires_pushed_authorization_requests()]: client.requiresPushedAuthorizationRequests
