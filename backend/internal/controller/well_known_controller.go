@@ -5,13 +5,28 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/pocket-id/pocket-id/backend/internal/common"
 	"github.com/pocket-id/pocket-id/backend/internal/service"
 )
+
+const OpenIDConnectRel = "http://openid.net/specs/connect/1.0/issuer"
+
+type WebfingerResponseLink struct {
+	Rel  string `json:"rel,omitempty"`
+	Href string `json:"href"`
+}
+
+type WebfingerResponse struct {
+	Subject string                  `json:"subject"`
+	Links   []WebfingerResponseLink `json:"links"`
+}
 
 // NewWellKnownController creates a new controller for OIDC discovery endpoints
 // @Summary OIDC Discovery controller
@@ -31,6 +46,7 @@ func NewWellKnownController(group *gin.RouterGroup, jwtService *service.JwtServi
 
 	group.GET("/.well-known/jwks.json", wkc.jwksHandler)
 	group.GET("/.well-known/openid-configuration", wkc.openIDConfigurationHandler)
+	group.GET("/.well-known/webfinger", wkc.webFingerHandler)
 }
 
 type WellKnownController struct {
@@ -97,4 +113,74 @@ func (wkc *WellKnownController) computeOIDCConfiguration() ([]byte, error) {
 		"require_pushed_authorization_requests":          false,
 	}
 	return json.Marshal(config)
+}
+
+// webFingerHandler godoc
+// @Summary Get WebFinger resource
+// @Description Returns the WebFinger resource with the associated links for the given resource
+// @Tags WebFinger
+// @Produce json
+// @Success 200 {object} object "WebFingerResponse"
+// @Router /.well-known/webfinger [get]
+func (wkc *WellKnownController) webFingerHandler(c *gin.Context) {
+	appUrl := common.EnvConfig.AppURL
+
+	c.Header("Content-Type", "application/jrd+json")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	resource := c.Query("resource")
+
+	if !wkc.validateWebFingerResource(resource) {
+		c.JSON(400, gin.H{
+			"status":  400,
+			"message": "invalid resource",
+		})
+		return
+	}
+
+	res := WebfingerResponse{
+		Subject: resource,
+		Links:   []WebfingerResponseLink{},
+	}
+
+	rel := c.Request.URL.Query()["rel"]
+
+	if len(rel) == 0 || slices.Contains(rel, OpenIDConnectRel) {
+		res.Links = append(res.Links, WebfingerResponseLink{Rel: OpenIDConnectRel, Href: appUrl})
+	}
+
+	c.JSON(200, res)
+}
+
+func (wkc *WellKnownController) validateWebFingerResource(resource string) bool {
+	prefix, suffix, found := strings.Cut(resource, ":")
+
+	if !found {
+		return false
+	}
+
+	switch prefix {
+	// For users we could check if the user exists in the database but this could
+	// leak information about existing users, so we just check the format of the resource
+	case "acct":
+		if strings.Count(suffix, "@") != 1 {
+			return false
+		}
+		username, domain, found := strings.Cut(suffix, "@")
+		if !found || username == "" || domain == "" {
+			return false
+		}
+	case "https", "http":
+		u, err := url.Parse(resource)
+		if err != nil {
+			return false
+		}
+		if u.Host == "" {
+			return false
+		}
+	default:
+		return false
+	}
+
+	return true
 }
